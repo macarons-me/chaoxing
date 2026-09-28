@@ -172,5 +172,39 @@ class TestQueryIntegration(unittest.TestCase):
         self.assertIn('json', content.lower())
 
 
+class TestClientReuse(unittest.TestCase):
+    """客户端应在初始化时创建一次, 后续请求复用同一实例."""
+
+    def setUp(self):
+        self.q_info = {'type': 'single', 'title': '测试题', 'options': 'A 甲\nB 乙'}
+
+    @patch('api.answer.OpenAI')
+    def test_client_created_once_and_reused(self, mock_openai):
+        ai = make_ai()
+        self.assertEqual(mock_openai.call_count, 1)
+        self.assertIs(ai._client, mock_openai.return_value)
+
+        mock_openai.return_value.chat.completions.create.return_value = make_completion('{"Answer": ["乙"]}')
+        self.assertEqual(ai._query(self.q_info), '乙')
+        self.assertEqual(ai._query(self.q_info), '乙')
+        self.assertEqual(mock_openai.call_count, 1)
+
+    @patch('api.answer.OpenAI')
+    def test_check_llm_connection_reuses_client(self, mock_openai):
+        ai = make_ai()
+        mock_openai.return_value.chat.completions.create.return_value = make_completion('2')
+        self.assertTrue(ai.check_llm_connection())
+        self.assertEqual(mock_openai.call_count, 1)
+
+    @patch('api.answer.httpx.Client')
+    @patch('api.answer.OpenAI')
+    def test_proxy_client_created_once(self, mock_openai, mock_httpx_client):
+        ai = make_ai(http_proxy='http://127.0.0.1:7890')
+        self.assertEqual(mock_httpx_client.call_count, 1)
+        self.assertEqual(mock_openai.call_count, 1)
+        self.assertIs(mock_openai.call_args.kwargs['http_client'], mock_httpx_client.return_value)
+        self.assertIs(ai._client, mock_openai.return_value)
+
+
 if __name__ == '__main__':
     unittest.main()

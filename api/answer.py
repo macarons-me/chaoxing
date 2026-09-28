@@ -1229,12 +1229,7 @@ class AI(Tiku):
             match = re.search(pattern, md_str, re.DOTALL)
             return match.group(1).strip() if match else md_str.strip()
 
-        if self.http_proxy:
-            proxy = self.http_proxy
-            httpx_client = httpx.Client(proxy=proxy)
-            client = OpenAI(http_client=httpx_client, base_url=self.endpoint, api_key=self.key)
-        else:
-            client = OpenAI(base_url=self.endpoint, api_key=self.key)
+        client = self._client
         # 去除选项字母，防止大模型直接输出字母而非内容
         options_list = q_info['options'].split('\n')
         cleaned_options = [re.sub(r"^[A-Z]\s*", "", option) for option in options_list]
@@ -1346,6 +1341,16 @@ class AI(Tiku):
             logger.warning(f'{self.name}配置 json_mode 无效: {self._conf.get("json_mode")}, 已按 false 处理')
             self.json_mode = False
 
+        # 全程复用同一客户端, 保活底层连接池, 避免每次请求重复 TCP+TLS 握手
+        if self.http_proxy:
+            self._client = OpenAI(
+                http_client=httpx.Client(proxy=self.http_proxy),
+                base_url=self.endpoint,
+                api_key=self.key,
+            )
+        else:
+            self._client = OpenAI(base_url=self.endpoint, api_key=self.key)
+
     def check_llm_connection(self) -> bool:
         """
         检查大模型连接是否可用
@@ -1354,12 +1359,7 @@ class AI(Tiku):
         with self._lock:
             logger.info(f'正在检查 {self.name} 连接...')
             try:
-                # 初始化客户端
-                if self.http_proxy:
-                    httpx_client = httpx.Client(proxy=self.http_proxy)
-                    client = OpenAI(http_client=httpx_client, base_url=self.endpoint, api_key=self.key)
-                else:
-                    client = OpenAI(base_url=self.endpoint, api_key=self.key)
+                client = self._client
 
                 # 限流等待
                 self._wait_for_interval()
